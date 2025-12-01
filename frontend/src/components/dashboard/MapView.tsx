@@ -60,7 +60,7 @@ const MapView: React.FC<MapViewProps> = ({ devices }) => {
       const existing = markers.get(device.id);
 
       // Determine icon color based on status
-      let iconColor = '#gray';
+      let iconColor = 'gray';
       if (device.status === 'ONLINE') iconColor = '#22c55e'; // green
       else if (device.status === 'OFFLINE') iconColor = '#ef4444'; // red
       else if (device.status === 'LOW_BATTERY') iconColor = '#eab308'; // yellow
