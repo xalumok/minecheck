@@ -1,0 +1,246 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User roles enum
+enum UserRole {
+  MEGA_ADMIN // Can create users, view all networks, manage users
+  USER       // Can create networks, register base stations, control their units
+  GUEST      // Can view specific networks, optional commander permission
+}
+
+// Guest permission levels
+enum GuestPermission {
+  VIEW_ONLY  // Can only view network data
+  COMMANDER  // Can view and send IGNITE commands
+}
+
+// Device types
+enum DeviceType {
+  BASE_STATION // NodeMCU/ESP8266 gateway
+  FIELD_UNIT   // ATmega-8 firework launcher
+}
+
+// Device status
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  DISCOVERED // Auto-discovered but not yet confirmed
+  LOW_BATTERY
+}
+
+// Message types from firmware
+enum MessageType {
+  MSG_TYPE_POSA   // Presence announcement
+  MSG_TYPE_BATT   // Battery voltage request/response
+  MSG_TYPE_GPS    // GPS coordinates request/response
+  MSG_TYPE_COORD  // Coordinate data
+  MSG_TYPE_PING   // Ping request
+  MSG_TYPE_PONG   // Pong response
+  MSG_TYPE_SET_R  // Set relay/ignition
+  MSG_TYPE_RES_ID // Response ID
+  MSG_TYPE_MSG    // Generic message
+  MSG_TYPE_IGNITE // Ignition command
+}
+
+// Command status
+enum CommandStatus {
+  PENDING     // Waiting to be dispatched
+  PROCESSING  // Sent to base station
+  COMPLETED   // Acknowledged as completed
+  FAILED      // Failed to execute
+  TIMEOUT     // No response received
+}
+
+// Command priority
+enum CommandPriority {
+  CRITICAL // IGNITE commands
+  HIGH     // Safety-related commands
+  NORMAL   // Diagnostic commands (BATT, GPS, PING)
+  LOW      // Maintenance commands
+}
+
+// User model
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // Hashed password
+  name      String
+  role      UserRole @default(USER)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  ownedNetworks Network[]     @relation("NetworkOwner")
+  guestAccess   NetworkGuest[]
+  commands      Command[]
+
+  @@index([email])
+  @@index([role])
+}
+
+// Network model (e.g., "New Year Event 2025")
+model Network {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  ownerId     String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  owner       User           @relation("NetworkOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  devices     Device[]
+  guests      NetworkGuest[]
+  commands    Command[]
+  telemetry   Telemetry[]
+
+  @@index([ownerId])
+  @@index([isActive])
+}
+
+// Guest access to networks
+model NetworkGuest {
+  id         String          @id @default(cuid())
+  networkId  String
+  userId     String
+  permission GuestPermission @default(VIEW_ONLY)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  // Relationships
+  network Network @relation(fields: [networkId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([networkId, userId])
+  @@index([userId])
+  @@index([networkId])
+}
+
+// Device model (Base Station or Field Unit)
+model Device {
+  id               String       @id @default(cuid())
+  boardId          String       @unique // 12-digit string from hardware
+  deviceType       DeviceType
+  networkId        String
+  status           DeviceStatus @default(DISCOVERED)
+  name             String?      // User-assigned friendly name
+  
+  // GPS coordinates (for Field Units)
+  latitude         Float?
+  longitude        Float?
+  altitude         Float?
+  
+  // Battery info (for Field Units)
+  batteryVoltage   Float?
+  batteryPercent   Int?
+  
+  // Connection info
+  lastSeen         DateTime?
+  lastPolled       DateTime?    // For Base Stations
+  firmwareVersion  String?
+  
+  // Additional metadata
+  metadata         Json?        // Flexible storage for device-specific data
+  
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  // Relationships
+  network          Network      @relation(fields: [networkId], references: [id], onDelete: Cascade)
+  sentCommands     Command[]    @relation("CommandSource")
+  targetCommands   Command[]    @relation("CommandTarget")
+  telemetry        Telemetry[]
+
+  @@index([boardId])
+  @@index([networkId])
+  @@index([deviceType])
+  @@index([status])
+  @@index([lastSeen])
+}
+
+// Command queue model
+model Command {
+  id              String          @id @default(cuid())
+  networkId       String
+  sourceDeviceId  String?         // Base Station that will transmit (nullable for broadcast)
+  targetDeviceId  String?         // Field Unit to receive (nullable for broadcast)
+  messageType     MessageType
+  priority        CommandPriority @default(NORMAL)
+  status          CommandStatus   @default(PENDING)
+  payload         Json?           // Additional command data
+  messageId       String?         // 5-char message ID
+  
+  // Tracking
+  createdBy       String
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  dispatchedAt    DateTime?       // When sent to base station
+  completedAt     DateTime?       // When acknowledged
+  
+  // Response data
+  responseData    Json?
+  errorMessage    String?
+  retryCount      Int             @default(0)
+  maxRetries      Int             @default(3)
+
+  // Relationships
+  network         Network         @relation(fields: [networkId], references: [id], onDelete: Cascade)
+  sourceDevice    Device?         @relation("CommandSource", fields: [sourceDeviceId], references: [id], onDelete: SetNull)
+  targetDevice    Device?         @relation("CommandTarget", fields: [targetDeviceId], references: [id], onDelete: SetNull)
+  creator         User            @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@index([networkId])
+  @@index([status])
+  @@index([priority, createdAt])
+  @@index([sourceDeviceId])
+  @@index([targetDeviceId])
+  @@index([createdAt])
+}
+
+// Telemetry data model
+model Telemetry {
+  id         String      @id @default(cuid())
+  networkId  String
+  deviceId   String
+  messageType MessageType
+  messageId  String?     // 5-char message ID from hardware
+  
+  // Telemetry data
+  data       Json        // Flexible storage for various telemetry types
+  
+  // GPS data (if applicable)
+  latitude   Float?
+  longitude  Float?
+  altitude   Float?
+  
+  // Battery data (if applicable)
+  batteryVoltage Float?
+  
+  // Signal strength
+  rssi       Int?        // Received Signal Strength Indicator
+  snr        Float?      // Signal-to-Noise Ratio
+  
+  receivedAt DateTime    @default(now())
+  createdAt  DateTime    @default(now())
+
+  // Relationships
+  network    Network     @relation(fields: [networkId], references: [id], onDelete: Cascade)
+  device     Device      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([networkId])
+  @@index([deviceId])
+  @@index([messageType])
+  @@index([receivedAt])
+  @@index([createdAt])
+}
