@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Device, Network } from '../../types';
+import type { Device, Network } from '../../types';
 
 interface MapViewProps {
   devices: Device[];

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { networksApi, devicesApi } from '../../api';
-import { Network } from '../../types';
+import type { Network } from '../../types';
 
 const NetworksList: React.FC = () => {
   const navigate = useNavigate();

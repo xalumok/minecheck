@@ -50,7 +50,7 @@ export const createCommand = async (req: AuthRequest, res: Response) => {
 
     // Check permissions
     const isOwner = targetDevice.network.ownerId === req.user.userId;
-    const guestAccess = targetDevice.network.guests.find(g => g.userId === req.user.userId);
+    const guestAccess = targetDevice.network.guests.find(g => g.userId === req.user!.userId);
     const isCommander = guestAccess?.permission === 'COMMANDER';
 
     // IGNITE commands require OWNER or COMMANDER permission
@@ -137,7 +137,7 @@ export const getCommands = async (req: AuthRequest, res: Response) => {
     const hasAccess =
       req.user.role === 'MEGA_ADMIN' ||
       network.ownerId === req.user.userId ||
-      network.guests.some(g => g.userId === req.user.userId);
+      network.guests.some(g => g.userId === req.user!.userId);
 
     if (!hasAccess) {
       return res.status(403).json({ error: 'Access denied' });
@@ -192,7 +192,7 @@ export const getTelemetry = async (req: AuthRequest, res: Response) => {
     const hasAccess =
       req.user.role === 'MEGA_ADMIN' ||
       device.network.ownerId === req.user.userId ||
-      device.network.guests.some(g => g.userId === req.user.userId);
+      device.network.guests.some(g => g.userId === req.user!.userId);
 
     if (!hasAccess) {
       return res.status(403).json({ error: 'Access denied' });

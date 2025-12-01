@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Device, Network } from '../../types';
+import React from 'react';
+import type { Device, Network } from '../../types';
 import { commandsApi } from '../../api';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -85,11 +85,6 @@ const ListView: React.FC<ListViewProps> = ({ devices, network }) => {
       </span>
     );
   };
-
-  const fieldUnits = useMemo(
-    () => devices.filter(d => d.deviceType === 'FIELD_UNIT'),
-    [devices]
-  );
 
   return (
     <div className="h-full overflow-auto bg-white">
