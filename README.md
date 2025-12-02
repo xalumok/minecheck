@@ -49,6 +49,13 @@ cp .env.example .env
 npm run dev
 ```
 
+**Note:** If you encounter PostCSS/Tailwind errors after pulling updates, try:
+```bash
+rm -rf node_modules
+npm install
+npm run dev
+```
+
 ## Features
 
 - User roles: MEGA_ADMIN, USER, GUEST
