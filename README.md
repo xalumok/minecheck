@@ -25,7 +25,7 @@ A production-grade web application to manage a mesh network of LoRa-based firewo
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ and npm
+- Node.js 18+ and npm (tested with Node.js 20 and 24)
 - PostgreSQL 14+
 
 ### Backend Setup
