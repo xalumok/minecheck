@@ -39,7 +39,7 @@ export const getDevices = async (req: AuthRequest, res: Response) => {
     const hasAccess =
       req.user.role === 'MEGA_ADMIN' ||
       network.ownerId === req.user.userId ||
-      network.guests.some(g => g.userId === req.user.userId);
+      network.guests.some(g => g.userId === req.user!.userId);
 
     if (!hasAccess) {
       return res.status(403).json({ error: 'Access denied' });
@@ -185,7 +185,7 @@ export const getDevice = async (req: AuthRequest, res: Response) => {
     const hasAccess =
       req.user.role === 'MEGA_ADMIN' ||
       device.network.ownerId === req.user.userId ||
-      device.network.guests.some(g => g.userId === req.user.userId);
+      device.network.guests.some(g => g.userId === req.user!.userId);
 
     if (!hasAccess) {
       return res.status(403).json({ error: 'Access denied' });

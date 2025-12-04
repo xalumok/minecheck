@@ -25,7 +25,7 @@ A production-grade web application to manage a mesh network of LoRa-based firewo
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ and npm
+- Node.js 18+ and npm (tested with Node.js 20 and 24)
 - PostgreSQL 14+
 
 ### Backend Setup
@@ -53,6 +53,13 @@ The seed step reads `INITIAL_MEGA_ADMIN_EMAIL`, `INITIAL_MEGA_ADMIN_PASSWORD`, a
 cd frontend
 npm install
 cp .env.example .env
+npm run dev
+```
+
+**Note:** If you encounter PostCSS/Tailwind errors after pulling updates, try:
+```bash
+rm -rf node_modules
+npm install
 npm run dev
 ```
 
