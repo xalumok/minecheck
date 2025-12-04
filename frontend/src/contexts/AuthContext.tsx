@@ -1,58 +1,64 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, AuthResponse } from '../types';
+import React, { useState, useEffect } from 'react';
+import type { User, AuthResponse } from '../types';
 import { authApi } from '../api';
+import { AuthContext } from './AuthContextBase';
 
-interface AuthContextType {
-  user: User | null;
-  token: string | null;
-  isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
-  setUser: (user: User) => void;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const getInitialToken = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  return localStorage.getItem('authToken');
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [token, setToken] = useState<string | null>(getInitialToken);
+  const [isLoading, setIsLoading] = useState<boolean>(() => Boolean(getInitialToken()));
 
   useEffect(() => {
-    // Check for existing token on mount
-    const storedToken = localStorage.getItem('authToken');
-    if (storedToken) {
-      setToken(storedToken);
-      // Fetch current user
-      authApi
-        .getCurrentUser()
-        .then((userData) => {
+    if (!token) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    authApi
+      .getCurrentUser()
+      .then((userData) => {
+        if (!isCancelled) {
           setUser(userData);
-        })
-        .catch(() => {
-          // Token invalid, clear it
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
           localStorage.removeItem('authToken');
           setToken(null);
-        })
-        .finally(() => {
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
           setIsLoading(false);
-        });
-    } else {
-      setIsLoading(false);
-    }
-  }, []);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [token]);
 
   const login = async (email: string, password: string) => {
     const response: AuthResponse = await authApi.login({ email, password });
     setUser(response.user);
     setToken(response.token);
     localStorage.setItem('authToken', response.token);
+    setIsLoading(false);
   };
 
   const logout = () => {
     setUser(null);
     setToken(null);
     localStorage.removeItem('authToken');
+    setIsLoading(false);
   };
 
   return (
@@ -60,12 +66,4 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       {children}
     </AuthContext.Provider>
   );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
 };

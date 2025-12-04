@@ -10,6 +10,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
+    "scenario:setup": "tsx scripts/setupTestNetwork.ts",
+    "scenario:simulate": "tsx scripts/simulateDeviceActivity.ts",
     "test": "echo \"No tests specified yet\" && exit 0"
   },
   "keywords": ["lora", "fireworks", "mesh-network"],
@@ -34,5 +36,8 @@
     "prisma": "^5.7.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }

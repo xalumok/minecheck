@@ -1,6 +1,18 @@
 import React from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/useAuth';
 import { useNavigate } from 'react-router-dom';
+
+type ApiError = {
+  response?: {
+    data?: {
+      error?: unknown;
+    };
+  };
+};
+
+const isApiError = (error: unknown): error is ApiError => {
+  return typeof error === 'object' && error !== null && 'response' in error;
+};
 
 const Login: React.FC = () => {
   const [email, setEmail] = React.useState('');
@@ -16,10 +28,16 @@ const Login: React.FC = () => {
     setIsLoading(true);
 
     try {
-      await login(email, password);
-      navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed. Please try again.');
+  await login(email, password);
+  navigate('/networks');
+    } catch (error: unknown) {
+      const fallback = 'Login failed. Please try again.';
+      if (isApiError(error)) {
+        const apiMessage = error.response?.data?.error;
+        setError(typeof apiMessage === 'string' ? apiMessage : fallback);
+      } else {
+        setError(fallback);
+      }
     } finally {
       setIsLoading(false);
     }

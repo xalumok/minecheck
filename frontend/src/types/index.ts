@@ -1,3 +1,6 @@
+// Shared/value helper types
+export type JsonObject = Record<string, unknown>;
+
 // User types
 export type UserRole = 'MEGA_ADMIN' | 'USER' | 'GUEST';
 
@@ -78,7 +81,7 @@ export interface Device {
   lastSeen?: string;
   lastPolled?: string;
   firmwareVersion?: string;
-  metadata?: any;
+  metadata?: JsonObject;
   createdAt: string;
   updatedAt: string;
 }
@@ -107,14 +110,14 @@ export interface Command {
   messageType: MessageType;
   priority: CommandPriority;
   status: CommandStatus;
-  payload?: any;
+  payload?: JsonObject;
   messageId?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
   dispatchedAt?: string;
   completedAt?: string;
-  responseData?: any;
+  responseData?: JsonObject;
   errorMessage?: string;
   retryCount: number;
   maxRetries: number;
@@ -129,7 +132,7 @@ export interface Telemetry {
   deviceId: string;
   messageType: MessageType;
   messageId?: string;
-  data: any;
+  data: JsonObject;
   latitude?: number;
   longitude?: number;
   altitude?: number;

@@ -2,7 +2,13 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { networksApi, devicesApi } from '../../api';
-import { Network } from '../../types';
+import type { Network, Device } from '../../types';
+
+type DeviceFormData = {
+  boardId: string;
+  deviceType: Device['deviceType'];
+  name: string;
+};
 
 const NetworksList: React.FC = () => {
   const navigate = useNavigate();
@@ -10,9 +16,9 @@ const NetworksList: React.FC = () => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showRegisterDevice, setShowRegisterDevice] = useState<string | null>(null);
   const [formData, setFormData] = useState({ name: '', description: '' });
-  const [deviceData, setDeviceData] = useState({
+  const [deviceData, setDeviceData] = useState<DeviceFormData>({
     boardId: '',
-    deviceType: 'BASE_STATION' as 'BASE_STATION' | 'FIELD_UNIT',
+    deviceType: 'BASE_STATION',
     name: '',
   });
 
@@ -31,7 +37,7 @@ const NetworksList: React.FC = () => {
   });
 
   const registerDeviceMutation = useMutation({
-    mutationFn: ({ networkId, data }: { networkId: string; data: any }) =>
+    mutationFn: ({ networkId, data }: { networkId: string; data: DeviceFormData }) =>
       devicesApi.register(networkId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['devices'] });
@@ -138,7 +144,12 @@ const NetworksList: React.FC = () => {
                       />
                       <select
                         value={deviceData.deviceType}
-                        onChange={(e) => setDeviceData({ ...deviceData, deviceType: e.target.value as any })}
+                        onChange={(e) =>
+                          setDeviceData({
+                            ...deviceData,
+                            deviceType: e.target.value as Device['deviceType'],
+                          })
+                        }
                         className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
                       >
                         <option value="BASE_STATION">Base Station</option>

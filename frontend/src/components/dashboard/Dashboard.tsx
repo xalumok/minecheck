@@ -4,7 +4,6 @@ import { useParams } from 'react-router-dom';
 import { networksApi, devicesApi } from '../../api';
 import MapView from './MapView';
 import ListView from './ListView';
-import { Device } from '../../types';
 
 type ViewMode = 'map' | 'list';
 

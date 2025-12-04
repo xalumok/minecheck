@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Device, Network } from '../../types';
+import React from 'react';
+import type { Device, Network, MessageType, CommandPriority } from '../../types';
 import { commandsApi } from '../../api';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -7,6 +7,26 @@ interface ListViewProps {
   devices: Device[];
   network: Network;
 }
+
+type ApiError = {
+  response?: {
+    data?: {
+      error?: unknown;
+    };
+  };
+};
+
+const isApiError = (error: unknown): error is ApiError => {
+  return typeof error === 'object' && error !== null && 'response' in error;
+};
+
+const formatErrorMessage = (error: unknown, fallback: string) => {
+  if (isApiError(error)) {
+    const message = error.response?.data?.error;
+    return typeof message === 'string' ? message : fallback;
+  }
+  return fallback;
+};
 
 const ListView: React.FC<ListViewProps> = ({ devices, network }) => {
   const queryClient = useQueryClient();
@@ -18,62 +38,44 @@ const ListView: React.FC<ListViewProps> = ({ devices, network }) => {
     },
   });
 
+  const sendDeviceCommand = async (
+    device: Device,
+    messageType: MessageType,
+    priority: CommandPriority,
+    successMessage: string
+  ) => {
+    try {
+      await sendCommandMutation.mutateAsync({
+        targetDeviceId: device.id,
+        messageType,
+        priority,
+      });
+      alert(successMessage);
+    } catch (error: unknown) {
+      alert(formatErrorMessage(error, 'Failed to send command'));
+    }
+  };
+
   const handleIgnite = async (device: Device) => {
     if (confirm(`Are you sure you want to IGNITE ${device.name || device.boardId}?`)) {
-      try {
-        await sendCommandMutation.mutateAsync({
-          targetDeviceId: device.id,
-          messageType: 'MSG_TYPE_IGNITE',
-          priority: 'CRITICAL',
-        });
-        alert('Ignition command sent!');
-      } catch (error: any) {
-        alert(error.response?.data?.error || 'Failed to send command');
-      }
+      await sendDeviceCommand(device, 'MSG_TYPE_IGNITE', 'CRITICAL', 'Ignition command sent!');
     }
   };
 
   const handleBatteryCheck = async (device: Device) => {
-    try {
-      await sendCommandMutation.mutateAsync({
-        targetDeviceId: device.id,
-        messageType: 'MSG_TYPE_BATT',
-        priority: 'NORMAL',
-      });
-      alert('Battery check requested');
-    } catch (error: any) {
-      alert(error.response?.data?.error || 'Failed to send command');
-    }
+    await sendDeviceCommand(device, 'MSG_TYPE_BATT', 'NORMAL', 'Battery check requested');
   };
 
   const handleGPSUpdate = async (device: Device) => {
-    try {
-      await sendCommandMutation.mutateAsync({
-        targetDeviceId: device.id,
-        messageType: 'MSG_TYPE_GPS',
-        priority: 'NORMAL',
-      });
-      alert('GPS update requested');
-    } catch (error: any) {
-      alert(error.response?.data?.error || 'Failed to send command');
-    }
+    await sendDeviceCommand(device, 'MSG_TYPE_GPS', 'NORMAL', 'GPS update requested');
   };
 
   const handlePing = async (device: Device) => {
-    try {
-      await sendCommandMutation.mutateAsync({
-        targetDeviceId: device.id,
-        messageType: 'MSG_TYPE_PING',
-        priority: 'NORMAL',
-      });
-      alert('Ping sent');
-    } catch (error: any) {
-      alert(error.response?.data?.error || 'Failed to send command');
-    }
+    await sendDeviceCommand(device, 'MSG_TYPE_PING', 'NORMAL', 'Ping sent');
   };
 
-  const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
+  const getStatusBadge = (status: Device['status']) => {
+    const styles: Record<Device['status'], string> = {
       ONLINE: 'bg-green-100 text-green-800',
       OFFLINE: 'bg-red-100 text-red-800',
       LOW_BATTERY: 'bg-yellow-100 text-yellow-800',
@@ -85,11 +87,6 @@ const ListView: React.FC<ListViewProps> = ({ devices, network }) => {
       </span>
     );
   };
-
-  const fieldUnits = useMemo(
-    () => devices.filter(d => d.deviceType === 'FIELD_UNIT'),
-    [devices]
-  );
 
   return (
     <div className="h-full overflow-auto bg-white">
@@ -122,7 +119,7 @@ const ListView: React.FC<ListViewProps> = ({ devices, network }) => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {devices.map(device => (
+              {devices.map((device: Device) => (
                 <tr key={device.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usersApi } from '../../api';
-import { User } from '../../types';
-import { useAuth } from '../../contexts/AuthContext';
+import type { User } from '../../types';
+import { useAuth } from '../../contexts/useAuth';
 
 const UserManagement: React.FC = () => {
   const { user: currentUser } = useAuth();

@@ -34,11 +34,18 @@ A production-grade web application to manage a mesh network of LoRa-based firewo
 cd backend
 npm install
 cp .env.example .env
-# Edit .env with your database credentials
+# Edit .env with your database credentials and initial Mega Admin credentials
 npm run prisma:generate
 npm run prisma:migrate
+npx prisma db seed
+npm run scenario:setup
+npm run scenario:simulate
 npm run dev
 ```
+
+The seed step reads `INITIAL_MEGA_ADMIN_EMAIL`, `INITIAL_MEGA_ADMIN_PASSWORD`, and `INITIAL_MEGA_ADMIN_NAME` from `.env` to ensure a default `MEGA_ADMIN` account exists.
+
+`npm run scenario:setup` ensures a `test@test.com` operator, creates the demo network, and registers both the base station and field unit devices. `npm run scenario:simulate` then generates telemetry (GPS/location, presence) and queues sample commands (IGNITE + GPS update) to mimic real hardware traffic.
 
 ### Frontend Setup
 

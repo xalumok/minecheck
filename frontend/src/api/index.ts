@@ -111,7 +111,7 @@ export const commandsApi = {
     targetDeviceId: string;
     messageType: MessageType;
     priority?: CommandPriority;
-    payload?: any;
+    payload?: Record<string, unknown>;
   }): Promise<Command> => {
     const response = await apiClient.post<Command>('/commands', data);
     return response.data;
