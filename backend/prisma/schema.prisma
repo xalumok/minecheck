@@ -150,6 +150,9 @@ model Device {
   lastPolled       DateTime?    // For Base Stations
   firmwareVersion  String?
   
+  // Security
+  deviceSecret     String?      // HMAC secret key for message authentication (hex-encoded)
+  
   // Additional metadata
   metadata         Json?        // Flexible storage for device-specific data
   
