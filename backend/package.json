@@ -15,6 +15,7 @@
     "prisma:studio": "prisma studio",
     "scenario:setup": "tsx scripts/setupTestNetwork.ts",
     "scenario:simulate": "tsx scripts/simulateDeviceActivity.ts",
+    "security:provision": "tsx scripts/provisionDeviceSecrets.ts",
     "test": "echo \"No tests specified yet\" && exit 0"
   },
   "keywords": ["lora", "fireworks", "mesh-network"],

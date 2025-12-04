@@ -66,23 +66,125 @@ The NodeMCU base station performs three core functions:
 
 ## Authentication
 
-### Device Identification
+### Security Overview
 
-Base stations are identified by a **12-digit `boardId`** (e.g., `"123456789012"`).
+**All gateway API requests must be authenticated using HMAC-SHA256 signatures.** This prevents unauthorized devices from:
+- Spamming the network with fake telemetry
+- Retrieving commands meant for legitimate devices
+- Injecting malicious commands into the system
 
-- No JWT tokens required for gateway endpoints
-- `boardId` is sent as a query parameter or in request body
-- Must be exactly 12 characters (ASCII digits)
-- Base station must be pre-registered in the database before first use
+### Device Identification & Secrets
 
-### Registration Process
+Each device is identified by:
+1. **12-digit `boardId`** (e.g., `"123456789012"`) - Public identifier
+2. **Device Secret** (64-character hex string) - Private cryptographic key
 
-**Manual Registration (via Web UI):**
+The device secret is:
+- Generated server-side during device provisioning
+- Stored securely in the device firmware (never transmitted)
+- Used to create HMAC signatures for all API requests
+- Cannot be recovered if lost (device must be re-provisioned)
+
+### HMAC Signature Protocol
+
+Every gateway request must include two HTTP headers:
+
+#### Required Headers
+
+| Header | Format | Description |
+|--------|--------|-------------|
+| `X-Device-Timestamp` | ISO 8601 or Unix timestamp | Current time when request was created |
+| `X-Device-Signature` | 64-char hex string | HMAC-SHA256 signature of the canonical message |
+
+#### Canonical Message Format
+
+The signature is computed over a canonical message string:
+```
+boardId|timestamp|method|payload
+```
+
+Where:
+- `boardId`: 12-digit device identifier
+- `timestamp`: Value from `X-Device-Timestamp` header
+- `method`: API method name (`"poll"`, `"telemetry"`, or `"ack"`)
+- `payload`: JSON stringified request body (for POST requests), omitted for GET requests
+
+#### Example Signature Calculation (NodeMCU/C++)
+
+```cpp
+#include <Crypto.h>
+#include <SHA256.h>
+
+// Your device credentials (provisioned once)
+const char* BOARD_ID = "123456789012";
+const char* DEVICE_SECRET = "a1b2c3d4e5f6..."; // 64 hex chars
+
+String computeHMAC(String message) {
+  // Convert hex secret to bytes
+  uint8_t secretBytes[32];
+  hexStringToBytes(DEVICE_SECRET, secretBytes, 32);
+  
+  // Compute HMAC-SHA256
+  SHA256 sha256;
+  uint8_t hmac[32];
+  sha256.resetHMAC(secretBytes, 32);
+  sha256.update((uint8_t*)message.c_str(), message.length());
+  sha256.finalizeHMAC(secretBytes, 32, hmac, 32);
+  
+  // Convert to hex string
+  return bytesToHexString(hmac, 32);
+}
+
+String signRequest(String method, String payload = "") {
+  // Get current timestamp (Unix seconds)
+  unsigned long timestamp = getUnixTime(); // NTP sync required
+  
+  // Build canonical message
+  String canonical = String(BOARD_ID) + "|" + String(timestamp) + "|" + method;
+  if (payload.length() > 0) {
+    canonical += "|" + payload;
+  }
+  
+  // Compute signature
+  return computeHMAC(canonical);
+}
+```
+
+#### Anti-Replay Protection
+
+To prevent replay attacks:
+- Timestamps must be within **±60 seconds** of server time (accounts for clock skew)
+- Messages older than **5 minutes** are rejected
+- **NTP synchronization required** on all NodeMCU devices
+
+### Device Provisioning Process
+
+**Step 1: Register Device (via Web UI)**
 1. Network owner logs into web app
 2. Navigates to device management
 3. Adds new base station with `boardId`
-4. Device is registered with status `OFFLINE`
-5. First poll from base station changes status to `ONLINE`
+4. Device is created with status `OFFLINE` (no secret yet)
+
+**Step 2: Provision Secret (Server-Side)**
+```bash
+cd backend
+npm run security:provision
+```
+This generates secrets for all devices and outputs:
+```json
+[
+  {
+    "boardId": "123456789012",
+    "secret": "a1b2c3d4e5f6789..." 
+  }
+]
+```
+
+**Step 3: Program Device**
+1. Copy the secret for your device
+2. Flash firmware with `DEVICE_SECRET` constant set
+3. **Securely delete** the secrets file
+4. Device can now authenticate with the API
 
 **Database Schema:**
 ```sql
@@ -91,13 +193,15 @@ INSERT INTO "Device" (
   boardId, 
   deviceType, 
   networkId, 
-  status
+  status,
+  deviceSecret
 ) VALUES (
   'cuid...', 
   '123456789012', 
   'BASE_STATION', 
   'network-id', 
-  'OFFLINE'
+  'OFFLINE',
+  'a1b2c3d4e5f6789...' -- 64 hex chars
 );
 ```
 
@@ -182,10 +286,26 @@ If base station doesn't poll for >60 seconds, consider it offline (frontend logi
 |-----------|--------|----------|--------------------------------------|
 | `boardId` | string | ✅       | 12-digit base station identifier     |
 
+**Required Headers:**
+| Header | Type   | Required | Description                          |
+|--------|--------|----------|--------------------------------------|
+| `X-Device-Timestamp` | string/number | ✅ | Unix timestamp (seconds) or ISO 8601 |
+| `X-Device-Signature` | string | ✅ | HMAC-SHA256 signature (64 hex chars) |
+
 **Request Example:**
 ```http
 GET /api/gateway/poll?boardId=123456789012 HTTP/1.1
 Host: api.minecheck.com
+X-Device-Timestamp: 1702915234
+X-Device-Signature: a7f3b2c1d4e5f6789012345678901234567890abcdef1234567890abcdef1234
+```
+
+**Signature Calculation:**
+```cpp
+// Canonical message: boardId|timestamp|method
+String canonical = "123456789012|1702915234|poll";
+String signature = computeHMAC(DEVICE_SECRET, canonical);
+// Result: a7f3b2c1d4e5f6789012345678901234567890abcdef1234567890abcdef1234
 ```
 
 **Success Response (Command Available):**
@@ -216,17 +336,43 @@ Host: api.minecheck.com
 | Status | Meaning                                    |
 |--------|--------------------------------------------|
 | 400    | Invalid `boardId` format                   |
+| 401    | Missing/invalid signature or timestamp     |
+| 403    | Device not provisioned (no secret)         |
 | 404    | Base station not registered in database    |
 | 429    | Rate limit exceeded (>120 polls/minute)    |
 | 500    | Server error                               |
 
 **NodeMCU Implementation:**
 ```cpp
+#include <ESP8266HTTPClient.h>
+#include <WiFiClient.h>
+#include <Crypto.h>
+#include <SHA256.h>
+#include <NTPClient.h>
+
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org");
+
 String pollForCommands() {
   HTTPClient http;
-  String url = "http://api.minecheck.com/api/gateway/poll?boardId=" + BOARD_ID;
+  WiFiClient client;
   
-  http.begin(url);
+  // Get current timestamp
+  unsigned long timestamp = timeClient.getEpochTime();
+  
+  // Build canonical message: boardId|timestamp|method
+  String canonical = String(BOARD_ID) + "|" + String(timestamp) + "|poll";
+  
+  // Compute signature
+  String signature = computeHMAC(DEVICE_SECRET, canonical);
+  
+  // Make request with authentication headers
+  String url = "http://api.minecheck.com/api/gateway/poll?boardId=" + String(BOARD_ID);
+  
+  http.begin(client, url);
+  http.addHeader("X-Device-Timestamp", String(timestamp));
+  http.addHeader("X-Device-Signature", signature);
+  
   int httpCode = http.GET();
   
   if (httpCode == HTTP_CODE_OK) {
@@ -236,6 +382,10 @@ String pollForCommands() {
   } else if (httpCode == HTTP_CODE_NO_CONTENT) {
     http.end();
     return ""; // No commands pending
+  } else if (httpCode == 401 || httpCode == 403) {
+    Serial.printf("Authentication error: %d - Check device secret\n", httpCode);
+    http.end();
+    return "";
   } else {
     Serial.printf("Poll error: %d\n", httpCode);
     http.end();
@@ -251,6 +401,13 @@ String pollForCommands() {
 **Endpoint:** `POST /api/gateway/telemetry`
 
 **Description:** Forward LoRa telemetry data from field units to the server.
+
+**Required Headers:**
+| Header | Type   | Required | Description                          |
+|--------|--------|----------|--------------------------------------|
+| `X-Device-Timestamp` | string/number | ✅ | Unix timestamp (seconds) or ISO 8601 |
+| `X-Device-Signature` | string | ✅ | HMAC-SHA256 signature (64 hex chars) |
+| `Content-Type` | string | ✅ | Must be `application/json` |
 
 **Request Body:**
 ```json
@@ -314,9 +471,9 @@ void forwardTelemetry(String loraMessage) {
   // Parse LoRa message (example format: "ID:987654321098|TYPE:GPS|LAT:48.915|LON:37.809|ALT:245|BAT:3.87|RSSI:-85")
   
   HTTPClient http;
-  http.begin("http://api.minecheck.com/api/gateway/telemetry");
-  http.addHeader("Content-Type", "application/json");
+  WiFiClient client;
   
+  // Build JSON payload
   String json = "{";
   json += "\"boardId\":\"987654321098\",";
   json += "\"messageType\":\"MSG_TYPE_GPS\",";
@@ -326,6 +483,22 @@ void forwardTelemetry(String loraMessage) {
   json += "\"batteryVoltage\":3.87,";
   json += "\"rssi\":-85";
   json += "}";
+  
+  // Get current timestamp
+  unsigned long timestamp = timeClient.getEpochTime();
+  
+  // Build canonical message: boardId|timestamp|method|payload
+  // NOTE: boardId here is the BASE STATION's ID (sender), not the field unit
+  String canonical = String(BOARD_ID) + "|" + String(timestamp) + "|telemetry|" + json;
+  
+  // Compute signature
+  String signature = computeHMAC(DEVICE_SECRET, canonical);
+  
+  // Make authenticated request
+  http.begin(client, "http://api.minecheck.com/api/gateway/telemetry");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-Timestamp", String(timestamp));
+  http.addHeader("X-Device-Signature", signature);
   
   int httpCode = http.POST(json);
   
@@ -962,6 +1135,10 @@ void sendHealthStatus() {
 Before deploying to production:
 
 - [ ] Base station is registered in database with correct `boardId`
+- [ ] Device secret has been provisioned and securely stored in firmware
+- [ ] Device secret backup is stored securely offline (not in version control)
+- [ ] NTP time synchronization is configured and working
+- [ ] HMAC signature implementation is tested and verified
 - [ ] WiFi credentials are securely stored (not hardcoded)
 - [ ] Server URL is configurable (dev/prod environments)
 - [ ] LoRa frequency matches regulatory requirements (433/868/915 MHz)
@@ -972,11 +1149,14 @@ Before deploying to production:
 - [ ] Power consumption is optimized for battery operation (if applicable)
 - [ ] Firmware version is logged and sent to server
 - [ ] OTA (Over-The-Air) update mechanism is implemented
-- [ ] Secure boot is enabled (if security is critical)
+- [ ] Secure boot is enabled (ESP8266 flash encryption recommended)
+- [ ] Device secret is stored in protected flash memory region
 
 ---
 
-## Appendix: Complete NodeMCU Example
+## Appendix: Complete NodeMCU Example with Security
+
+### Full Implementation with HMAC Authentication
 
 ```cpp
 #include <ESP8266WiFi.h>
@@ -984,9 +1164,14 @@ Before deploying to production:
 #include <ArduinoJson.h>
 #include <LoRa.h>
 #include <Ticker.h>
+#include <WiFiUdp.h>
+#include <NTPClient.h>
+#include <Crypto.h>
+#include <SHA256.h>
 
 // Configuration
 #define BOARD_ID "123456789012"
+#define DEVICE_SECRET "a1b2c3d4e5f6..." // 64 hex chars - KEEP SECRET!
 #define WIFI_SSID "YourSSID"
 #define WIFI_PASSWORD "YourPassword"
 #define API_URL "http://api.minecheck.com"
@@ -997,9 +1182,67 @@ Before deploying to production:
 #define LORA_RST   16
 #define LORA_DIO0  4
 
+// Global objects
 WiFiClient wifiClient;
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 60000); // Update every 60s
 Ticker pollTicker;
 bool shouldPoll = false;
+
+//=============================================================================
+// SECURITY FUNCTIONS
+//=============================================================================
+
+// Convert hex string to byte array
+void hexStringToBytes(const char* hexStr, uint8_t* bytes, size_t len) {
+  for (size_t i = 0; i < len; i++) {
+    sscanf(hexStr + 2*i, "%2hhx", &bytes[i]);
+  }
+}
+
+// Convert byte array to hex string
+String bytesToHexString(const uint8_t* bytes, size_t len) {
+  String result = "";
+  for (size_t i = 0; i < len; i++) {
+    if (bytes[i] < 16) result += "0";
+    result += String(bytes[i], HEX);
+  }
+  return result;
+}
+
+// Compute HMAC-SHA256 signature
+String computeHMAC(const char* secret, const String& message) {
+  // Convert hex secret to bytes
+  uint8_t secretBytes[32];
+  hexStringToBytes(secret, secretBytes, 32);
+  
+  // Compute HMAC-SHA256
+  SHA256 sha256;
+  uint8_t hmac[32];
+  
+  sha256.resetHMAC(secretBytes, 32);
+  sha256.update((uint8_t*)message.c_str(), message.length());
+  sha256.finalizeHMAC(secretBytes, 32, hmac, 32);
+  
+  return bytesToHexString(hmac, 32);
+}
+
+// Build canonical message for signing
+String buildCanonicalMessage(const String& method, const String& payload = "") {
+  unsigned long timestamp = timeClient.getEpochTime();
+  
+  String canonical = String(BOARD_ID) + "|" + String(timestamp) + "|" + method;
+  
+  if (payload.length() > 0) {
+    canonical += "|" + payload;
+  }
+  
+  return canonical;
+}
+
+//=============================================================================
+// SETUP & LOOP
+//=============================================================================
 
 void setup() {
   Serial.begin(115200);
@@ -1014,6 +1257,11 @@ void setup() {
   }
   Serial.println("\nWiFi connected: " + WiFi.localIP().toString());
   
+  // Initialize NTP client
+  timeClient.begin();
+  timeClient.update();
+  Serial.println("NTP synchronized: " + timeClient.getFormattedTime());
+  
   // Initialize LoRa
   LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
   if (!LoRa.begin(433E6)) {
@@ -1024,9 +1272,14 @@ void setup() {
   
   // Start polling timer
   pollTicker.attach_ms(POLL_INTERVAL, []() { shouldPoll = true; });
+  
+  Serial.println("=== READY ===");
 }
 
 void loop() {
+  // Update NTP time
+  timeClient.update();
+  
   // Check WiFi
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi lost, reconnecting...");
@@ -1047,11 +1300,26 @@ void loop() {
   delay(10);
 }
 
+//=============================================================================
+// API FUNCTIONS
+//=============================================================================
+
 void pollForCommands() {
   HTTPClient http;
-  String url = String(API_URL) + "/api/gateway/poll?boardId=" + BOARD_ID;
   
+  // Build request URL
+  String url = String(API_URL) + "/api/gateway/poll?boardId=" + String(BOARD_ID);
+  
+  // Build canonical message and compute signature
+  unsigned long timestamp = timeClient.getEpochTime();
+  String canonical = String(BOARD_ID) + "|" + String(timestamp) + "|poll";
+  String signature = computeHMAC(DEVICE_SECRET, canonical);
+  
+  // Make authenticated request
   http.begin(wifiClient, url);
+  http.addHeader("X-Device-Timestamp", String(timestamp));
+  http.addHeader("X-Device-Signature", signature);
+  
   int httpCode = http.GET();
   
   if (httpCode == HTTP_CODE_OK) {
@@ -1059,7 +1327,11 @@ void pollForCommands() {
     http.end();
     processCommand(payload);
   } else if (httpCode == HTTP_CODE_NO_CONTENT) {
-    // No commands pending
+    // No commands pending - this is normal
+    http.end();
+  } else if (httpCode == 401 || httpCode == 403) {
+    Serial.printf("❌ Authentication error: %d\n", httpCode);
+    Serial.println("   Check DEVICE_SECRET and NTP sync");
     http.end();
   } else {
     Serial.printf("Poll error: %d\n", httpCode);
@@ -1080,31 +1352,46 @@ void processCommand(String jsonStr) {
   String targetBoardId = doc["targetBoardId"];
   String messageType = doc["messageType"];
   
-  Serial.println("Command received: " + messageType + " for " + targetBoardId);
+  Serial.println("📥 Command: " + messageType + " for " + targetBoardId);
   
   // Send via LoRa
   LoRa.beginPacket();
   LoRa.print("ID:" + targetBoardId + "|CMD:" + messageType);
   LoRa.endPacket();
   
-  // Wait for ACK (simplified - production should have timeout)
+  // Wait for ACK (simplified - production should have proper timeout)
   delay(5000);
   
-  // ACK to server (assuming success for demo)
+  // ACK to server
   acknowledgeCommand(commandId, true);
 }
 
 void acknowledgeCommand(String commandId, bool success) {
   HTTPClient http;
-  String url = String(API_URL) + "/api/gateway/ack";
   
+  // Build JSON payload
+  String json = "{\"commandId\":\"" + commandId + "\",\"success\":" + (success ? "true" : "false") + "}";
+  
+  // Build canonical message and compute signature
+  unsigned long timestamp = timeClient.getEpochTime();
+  String canonical = String(BOARD_ID) + "|" + String(timestamp) + "|ack|" + json;
+  String signature = computeHMAC(DEVICE_SECRET, canonical);
+  
+  // Make authenticated request
+  String url = String(API_URL) + "/api/gateway/ack";
   http.begin(wifiClient, url);
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-Timestamp", String(timestamp));
+  http.addHeader("X-Device-Signature", signature);
   
-  String json = "{\"commandId\":\"" + commandId + "\",\"success\":" + (success ? "true" : "false") + "}";
   int httpCode = http.POST(json);
   
-  Serial.printf("ACK sent: %d\n", httpCode);
+  if (httpCode == HTTP_CODE_OK) {
+    Serial.println("✅ ACK sent");
+  } else {
+    Serial.printf("ACK error: %d\n", httpCode);
+  }
+  
   http.end();
 }
 
@@ -1116,24 +1403,58 @@ void checkLoRaMessages() {
       message += (char)LoRa.read();
     }
     
-    Serial.println("LoRa RX: " + message);
+    Serial.println("📻 LoRa RX: " + message);
     
     // Parse and forward to server
     // Format: "ID:987654321098|TYPE:GPS|LAT:48.915|LON:37.809|BAT:3.87"
     
+    // Build JSON payload (simplified - parse from message in production)
+    String json = "{\"boardId\":\"987654321098\",\"messageType\":\"MSG_TYPE_GPS\"}";
+    
+    // Build canonical message and compute signature
+    unsigned long timestamp = timeClient.getEpochTime();
+    String canonical = String(BOARD_ID) + "|" + String(timestamp) + "|telemetry|" + json;
+    String signature = computeHMAC(DEVICE_SECRET, canonical);
+    
+    // Make authenticated request
     HTTPClient http;
     String url = String(API_URL) + "/api/gateway/telemetry";
-    
     http.begin(wifiClient, url);
     http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-Device-Timestamp", String(timestamp));
+    http.addHeader("X-Device-Signature", signature);
     
-    // Simplified - production should parse message properly
-    String json = "{\"boardId\":\"987654321098\",\"messageType\":\"MSG_TYPE_GPS\"}";
-    http.POST(json);
+    int httpCode = http.POST(json);
+    
+    if (httpCode == HTTP_CODE_CREATED) {
+      Serial.println("✅ Telemetry forwarded");
+    } else {
+      Serial.printf("Telemetry error: %d\n", httpCode);
+    }
+    
     http.end();
   }
 }
 ```
+
+### Required Arduino Libraries
+
+Install these libraries via Arduino Library Manager:
+
+- **ESP8266WiFi** (built-in with ESP8266 board package)
+- **ESP8266HTTPClient** (built-in)
+- **ArduinoJson** by Benoit Blanchon (v6.x)
+- **LoRa** by Sandeep Mistry
+- **NTPClient** by Fabrice Weinberg
+- **Crypto** by Rhys Weatherley (for HMAC-SHA256)
+
+### Security Notes
+
+1. **Never commit DEVICE_SECRET to version control**
+2. Store secrets in a separate config file (not included in git)
+3. Use ESP8266 flash encryption in production
+4. Implement secure OTA updates to rotate secrets if compromised
+5. Monitor for authentication failures - could indicate attack attempts
 
 ---
 
@@ -1141,9 +1462,9 @@ void checkLoRaMessages() {
 
 For questions or issues:
 
-- **GitHub Issues:** [minecheck/issues](https://github.com/yourusername/minecheck/issues)
+- **GitHub Issues:** [minecheck/issues](https://github.com/xalumok/minecheck/issues)
 - **Email:** support@minecheck.com
 - **Documentation:** [docs.minecheck.com](https://docs.minecheck.com)
 
-**Version:** 1.0  
-**Last Updated:** 2025-01-15
+**Version:** 2.0 (with HMAC security)
+**Last Updated:** 2025-12-04
