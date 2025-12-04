@@ -47,6 +47,9 @@ export function verifyHMAC(secret: string, message: string, signature: string): 
  * @param timestamp - ISO 8601 timestamp string or Unix timestamp (seconds)
  * @param maxAgeSeconds - Maximum age of message in seconds (default: 300 = 5 minutes)
  * @returns true if timestamp is recent enough
+ * 
+ * Clock skew tolerance: ±60 seconds (allows for NTP sync delays and network latency)
+ * Messages older than maxAgeSeconds are rejected to prevent replay attacks
  */
 export function isTimestampValid(timestamp: string | number, maxAgeSeconds: number = 300): boolean {
   try {

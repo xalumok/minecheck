@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../utils/prisma';
 import { verifyHMAC, isTimestampValid, buildCanonicalMessage } from '../utils/security';
+import { AuthenticatedRequest, AuthenticatedDevice } from '../types/express';
 
 /**
  * Middleware to validate HMAC signatures on gateway requests
@@ -90,7 +91,12 @@ export const validateDeviceSignature = async (
     }
 
     // Attach device info to request for use in controllers
-    (req as any).device = device;
+    (req as AuthenticatedRequest).device = {
+      id: device.id,
+      boardId: device.boardId,
+      deviceSecret: device.deviceSecret,
+      deviceType: device.deviceType,
+    } as AuthenticatedDevice;
 
     next();
   } catch (error) {

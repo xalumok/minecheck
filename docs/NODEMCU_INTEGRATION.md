@@ -1171,7 +1171,7 @@ Before deploying to production:
 
 // Configuration
 #define BOARD_ID "123456789012"
-#define DEVICE_SECRET "a1b2c3d4e5f6..." // 64 hex chars - KEEP SECRET!
+#define DEVICE_SECRET "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff" // EXAMPLE - Use real secret from provisioning
 #define WIFI_SSID "YourSSID"
 #define WIFI_PASSWORD "YourPassword"
 #define API_URL "http://api.minecheck.com"
